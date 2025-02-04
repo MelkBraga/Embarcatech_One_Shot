@@ -1,0 +1,162 @@
+#include <stdio.h>
+#include "pico/stdlib.h"
+#include "hardware/gpio.h"
+#include "hardware/timer.h"
+#include "hardware/pio.h"
+#include "ws2812b.pio.h"
+#include "hardware/pwm.h"
+
+#define LED_VERDE 11
+#define LED_AZUL 12
+#define LED_VERMELHO 13
+#define BOTAO 5
+#define LED_COUNT 25      
+#define WS2812_PIN 7
+
+volatile bool leds_ligados = false; 
+alarm_id_t alarm_id;
+volatile uint32_t last_interrupt_time = 0;
+
+struct pixel_t { uint32_t G, R, B; };
+typedef struct pixel_t pixel_t;
+pixel_t leds[LED_COUNT];
+PIO np_pio;
+uint sm;
+
+// Callback para desligar os LEDs RGB em sequência
+int64_t desligar_leds_callback(alarm_id_t id, void *user_data) {
+    static int estado = 0;
+
+    if (estado == 0) {
+        gpio_put(LED_AZUL, 0);
+        estado++;
+        alarm_id = add_alarm_in_ms(3000, desligar_leds_callback, NULL, false);
+    } else if (estado == 1) {
+        gpio_put(LED_VERMELHO, 0);
+        estado++;
+        alarm_id = add_alarm_in_ms(3000, desligar_leds_callback, NULL, false);
+    } else if (estado == 2) {
+        gpio_put(LED_VERDE, 0);
+        estado = 0;
+        leds_ligados = false; // Permite nova ativação do botão
+    }
+    return 0;
+}
+
+// Callback do botão com DEBOUNCE de 200ms implementado (Software Debounce)
+void botao_callback(uint gpio, uint32_t events) {
+    uint32_t current_time = to_ms_since_boot(get_absolute_time());
+    if (current_time - last_interrupt_time > 200) { 
+        last_interrupt_time = current_time;
+        if (!leds_ligados) {
+            leds_ligados = true;
+            gpio_put(LED_AZUL, 1);
+            gpio_put(LED_VERMELHO, 1);
+            gpio_put(LED_VERDE, 1);
+            add_alarm_in_ms(3000, desligar_leds_callback, NULL, false);
+        }
+    }
+}
+
+// Inicializa o controlador PIO para os LEDs WS2812
+void npInit(uint pin) {
+    uint offset = pio_add_program(pio0, &ws2812b_program);
+    np_pio = pio0;
+    sm = pio_claim_unused_sm(np_pio, true);
+    ws2812b_program_init(np_pio, sm, offset, pin, 800000.f);
+}
+
+// Define a cor de um LED específico na matriz de LEDs WS2812
+void npSetLED(const uint index, const uint8_t r, const uint8_t g, const uint8_t b) {
+    leds[index].R = r;
+    leds[index].G = g;
+    leds[index].B = b;
+}
+
+// Apaga todos os LEDs WS2812 da matriz
+void npClear() {
+    for (uint i = 0; i < LED_COUNT; ++i) npSetLED(i, 0, 0, 0);
+}
+
+// Atualiza a matriz de LEDs WS2812 enviando os dados ao hardware
+void npWrite() {
+    for (uint i = 0; i < LED_COUNT; ++i) {
+        pio_sm_put_blocking(np_pio, sm, leds[i].G << 24);
+        pio_sm_put_blocking(np_pio, sm, leds[i].R << 24);
+        pio_sm_put_blocking(np_pio, sm, leds[i].B << 24);
+    }
+}
+
+// Função que mapeia os LEDs WS2812 em zigue-zague, de acordo com a BitDogLab
+int zigzag_map(int row, int col) {
+    if (row % 2 == 0) {
+        return (row * 5) + col;  // Linhas pares (esquerda para direita)
+    } else {
+        return (row * 5) + (4 - col);  // Linhas ímpares (direita para esquerda)
+    }
+}
+
+// Desenha uma seta vermelha na matriz de LEDs WS2812, apontando para o botão A ou para o RGB quando aceso
+void desenha_seta(int num) {
+    npClear();
+
+    const uint8_t numeros[2][5][5] = {  
+        { // Seta esquerda
+            {0,0,1,0,0},
+            {0,1,0,0,0},
+            {1,1,1,1,1},
+            {0,1,0,0,0},
+            {0,0,1,0,0}
+        },
+        { // Seta baixo
+            {0,0,1,0,0},
+            {0,0,1,0,0},
+            {1,0,1,0,1},
+            {0,1,1,1,0},
+            {0,0,1,0,0}
+        }
+    };
+
+    for (int row = 4; row >= 0; row--) {  
+        for (int col = 4; col >= 0; col--) {  
+            int led_index = zigzag_map(4 - row, 4 - col);  
+            if (numeros[num][row][col]) {
+                npSetLED(led_index, 255, 0, 0);  
+            }
+        }
+    }
+
+    npWrite();
+}
+
+int main() {
+    stdio_init_all();
+
+    // Inicializa a matriz de LEDs WS2812
+    npInit(WS2812_PIN);
+
+    // Configura o LED RGB
+    gpio_init(LED_AZUL);
+    gpio_set_dir(LED_AZUL, GPIO_OUT);
+    gpio_init(LED_VERMELHO);
+    gpio_set_dir(LED_VERMELHO, GPIO_OUT);
+    gpio_init(LED_VERDE);
+    gpio_set_dir(LED_VERDE, GPIO_OUT);
+    
+    // Configura botão A
+    gpio_init(BOTAO);
+    gpio_set_dir(BOTAO, GPIO_IN);
+    gpio_pull_up(BOTAO);
+    gpio_set_irq_enabled_with_callback(BOTAO, GPIO_IRQ_EDGE_RISE, true, &botao_callback);
+
+
+    while (true) {
+        if (!leds_ligados) {
+            desenha_seta(0);
+            printf("Aguardando clique no botão...\n");
+        } else {
+            desenha_seta(1);
+        }
+        sleep_ms(100);
+    }
+}
