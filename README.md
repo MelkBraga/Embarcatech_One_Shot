@@ -31,11 +31,12 @@ WinUSB (v6.1.7600.16385) na interface 1. Só então clicar em "Run Project", na 
 
 Para iniciar o One Shot, pressione o botão A.
 
-No Serial Monitor do VSCode, selecionar a porta correta e clicar em "Start Monitoring" para observar uma mensagem 
-a cada segundo (100 ms) enquanto o botão não é pressionado.
+No painel de LEDs WS2812, setas indicativas são exibidas. No Serial Monitor do VSCode, selecionar a porta correta e 
+clicar em "Start Monitoring" para observar uma mensagem a cada segundo (100 ms) enquanto o botão não é pressionado.
 
 Perceba que o LED RGB vai começar da cor BRANCA, pois é o resultado da união do Azul, Vermelho e Verde que são iniciados
 simultâneamente. Em seguida mudará para uma cor AMARELADA, pois é o resultado da união do Vermelho e Verde, já que o Azul
 foi apagado depois de 3s. Por último, a cor VERDE, pois o Vermelho também foi apagado após outros 3 segundos.
 
 # Vídeo demonstrativo do One Shot funcionando na BitDogLab
+https://youtube.com/shorts/OT0d1WxaPsY?feature=share
